@@ -3,7 +3,7 @@ import { Role } from './types';
 
 // Set up an Axios instance
 export const api = axios.create({
-  baseURL: 'http://localhost:3000', // Your NestJS backend URL
+  baseURL: 'https://ec2-13-57-233-205.us-west-1.compute.amazonaws.com:3000', // Your NestJS backend URL
 });
 
 // Add a request interceptor to include the token in headers

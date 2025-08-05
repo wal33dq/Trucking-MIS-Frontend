@@ -6,18 +6,23 @@ export const LoginPage = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false); // Prevent multiple submissions
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return; // Prevent multiple submissions
+    setIsSubmitting(true);
     setError('');
     try {
       await login({ email, password });
       navigate('/');
     } catch (err) {
       setError('Failed to login. Please check your credentials.');
-      console.error(err);
+      console.error('Login error:', err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -38,6 +43,7 @@ export const LoginPage = () => {
               onChange={(e) => setEmail(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
               required
+              disabled={isSubmitting} // Disable input while submitting
             />
           </div>
           <div className="mb-6">
@@ -51,14 +57,16 @@ export const LoginPage = () => {
               onChange={(e) => setPassword(e.target.value)}
               className="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline"
               required
+              disabled={isSubmitting} // Disable input while submitting
             />
           </div>
           <div className="flex items-center justify-between">
             <button
               type="submit"
               className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full"
+              disabled={isSubmitting} // Disable button while submitting
             >
-              Sign In
+              {isSubmitting ? 'Logging in...' : 'Sign In'}
             </button>
           </div>
         </form>

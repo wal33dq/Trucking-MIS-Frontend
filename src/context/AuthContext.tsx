@@ -9,7 +9,7 @@ interface AuthContextType {
   login: (credentials: any) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
-  isLoading: boolean; // <-- ADDED: To track initial auth state check
+  isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -17,43 +17,46 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // <-- ADDED: Start in a loading state
+  const [isLoading, setIsLoading] = useState(true);
 
-  // This effect runs only once on app start-up to check for an existing token.
   useEffect(() => {
     const initializeAuth = () => {
       const storedToken = localStorage.getItem('token');
       if (storedToken) {
         try {
-          // You might want to add token expiration check here as well
-          const decoded: { sub: string; email: string; role: Role, name: string } = jwtDecode(storedToken);
-          setUser({ _id: decoded.sub, email: decoded.email, role: decoded.role, name: decoded.name });
+          const decoded: { sub: string; username: string; role: Role; name: string } = jwtDecode(storedToken);
+          setUser({ _id: decoded.sub, email: decoded.username, role: decoded.role, name: decoded.name });
           setToken(storedToken);
           api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
         } catch (error) {
-          console.error("Invalid token on initial load, logging out:", error);
-          // Clear out any invalid token and state
+          console.error('Invalid token on initial load, logging out:', error);
           localStorage.removeItem('token');
           setUser(null);
           setToken(null);
           delete api.defaults.headers.common['Authorization'];
         }
       }
-      // Finished checking, set loading to false
       setIsLoading(false);
     };
-
     initializeAuth();
-  }, []); // <-- Empty dependency array means this runs only once on mount
+  }, []);
 
   const login = async (credentials: any) => {
-    const response = await apiLogin(credentials);
-    const { access_token } = response.data;
-    localStorage.setItem('token', access_token);
-    const decoded: { sub: string; email: string; role: Role, name: string } = jwtDecode(access_token);
-    setUser({ _id: decoded.sub, email: decoded.email, role: decoded.role, name: decoded.name });
-    setToken(access_token);
-    api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+    try {
+      const response = await apiLogin(credentials);
+      const { access_token } = response.data;
+      if (!access_token) {
+        throw new Error('No access token received from server');
+      }
+      localStorage.setItem('token', access_token);
+      const decoded: { sub: string; username: string; role: Role; name: string } = jwtDecode(access_token);
+      setUser({ _id: decoded.sub, email: decoded.username, role: decoded.role, name: decoded.name });
+      setToken(access_token);
+      api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+    } catch (error) {
+      console.error('Login error in AuthContext:', error);
+      throw error; // Re-throw to be caught in LoginPage.tsx
+    }
   };
 
   const logout = () => {
@@ -63,14 +66,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     delete api.defaults.headers.common['Authorization'];
   };
 
-  // The value provided to the context consumers
   const contextValue = {
     user,
     token,
     login,
     logout,
     isAuthenticated: !!user,
-    isLoading // <-- ADDED: Expose loading state
+    isLoading,
   };
 
   return (

@@ -18,6 +18,7 @@ export const AgentTaskDetail = () => {
     callTime: '',
     comments: '',
     dispatcherId: '',
+    truckType: '',
   });
 
   // New state for handling file uploads and related errors
@@ -169,6 +170,10 @@ export const AgentTaskDetail = () => {
             <div>
                 <label className="block text-gray-700">Weight</label>
                 <input type="number" name="weight" value={formData.weight} onChange={handleChange} className="w-full p-2 border rounded" required/>
+            </div>
+            <div>
+                <label className="block text-gray-700">Truck Type</label>
+                <input type="text" name="truckType" value={formData.truckType} onChange={handleChange} className="w-full p-2 border rounded" required/>
             </div>
             <div>
                 <label className="block text-gray-700">Call Time</label>

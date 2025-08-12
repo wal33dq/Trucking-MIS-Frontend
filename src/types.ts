@@ -23,9 +23,11 @@ export interface Task {
   email?: string;
   phone?: string;
   workingDate?: string;
-  saleAgent: string | User; // Can be populated
+  saleAgent: string | User; // Can be populated with User object
   driverName?: string;
-  documentUrl?: string;
+  truckType?: string;
+  // FIX: Changed to 'documentUrls' to correctly handle multiple documents
+  documentUrls?: string[]; 
   offerRate?: number;
   weight?: number;
   callTime?: string;

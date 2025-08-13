@@ -22,6 +22,10 @@ export const login = (data: any) => api.post('/auth/login', data);
 export const createUser = (data: any) => api.post('/users', data);
 export const findUsersByRole = (role: Role) => api.get(`/users?role=${role}`);
 export const findAllUsers = () => api.get('/users');
+// New function to update a user
+export const updateUser = (id: string, data: any) => api.patch(`/users/${id}`, data);
+// New function to delete a user
+export const deleteUser = (id: string) => api.delete(`/users/${id}`);
 
 // --- Tasks ---
 export const uploadTasks = (saleAgentId: string, file: File) => {

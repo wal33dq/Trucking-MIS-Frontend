@@ -46,8 +46,9 @@ const AppContent = () => {
     <Router>
         {isAuthenticated && (
             <nav className="bg-gray-800 text-white p-4 flex justify-between items-center">
-                <div className="font-bold text-xl">MIS Portal</div>
+                <div className="font-bold text-xl">The One Services & Solution | Trucking Portal</div>
                 <div>
+                    {/* This now correctly attempts to display the user's name. */}
                     <span className="mr-4">Welcome, {user?.name} ({user?.role})</span>
                     <button onClick={logout} className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
                         Logout

@@ -1,198 +1,258 @@
-import React, { useState, useEffect } from 'react';
-import { User, Role } from '../types';
-import { findUsersByRole, uploadTasks } from '../api';
-
-// Define a type for the history items, assuming its structure
-interface UploadHistoryItem {
-    _id: string;
-    fileName: string;
-    assignedAgentName: string;
-    taskCount: number;
-    createdAt: string;
-}
+import React, { useState, useEffect, useCallback } from 'react';
+import { User, Role, Task } from '../types';
+import { findUsersByRole, getDispatcherOverviewTasks, getTasksByAgentAndStatus, deleteTask, deleteMultipleTasks, getAgentTaskCounts } from '../api';
+import { AssignToDispatcherModal, ReassignTaskModal, FollowUpModal, ViewTaskModal, DeleteConfirmationModal } from '../components/divider-dashboard/Modals';
+import { UploadTasksForm } from '../components/divider-dashboard/UploadTasksForm';
+import { ActionRequiredTasks } from '../components/divider-dashboard/ActionRequiredTasks';
+import { DispatcherOverview } from '../components/divider-dashboard/DispatcherOverview';
 
 export const DividerDashboard = () => {
     const [saleAgents, setSaleAgents] = useState<User[]>([]);
-    const [selectedAgent, setSelectedAgent] = useState<string>('');
-    const [file, setFile] = useState<File | null>(null);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
-    const [uploading, setUploading] = useState(false);
-    const [activeTab, setActiveTab] = useState('upload');
-    const [history, setHistory] = useState<UploadHistoryItem[]>([]);
-    const [loadingHistory, setLoadingHistory] = useState(true);
+    const [dispatchers, setDispatchers] = useState<User[]>([]);
+    
+    const [mainActiveTab, setMainActiveTab] = useState('agents'); // 'agents', 'dispatchers', 'upload'
+    const [agentReviewTab, setAgentReviewTab] = useState('assigned'); // 'assigned', 'submitted', 'neglected', 'follow-up'
+    const [activeAgentId, setActiveAgentId] = useState('all');
+    const [activeDispatcherId, setActiveDispatcherId] = useState('all');
 
-    const fetchHistory = async () => {
-        setLoadingHistory(true);
-        try {
-            // NOTE: You will need to create the 'getUploadHistory' API endpoint on your backend.
-            // For now, this will just be an empty array.
-            // const response = await getUploadHistory();
-            // setHistory(response.data);
-            setHistory([]);
-        } catch (err) {
-            setError('Could not fetch upload history. This API might need to be created.');
-            console.error(err);
-        } finally {
-            setLoadingHistory(false);
+    const [actionTasks, setActionTasks] = useState<Task[]>([]);
+    const [dispatcherTasks, setDispatcherTasks] = useState<Task[]>([]);
+    const [loadingActionTasks, setLoadingActionTasks] = useState(true);
+    const [loadingDispatcherTasks, setLoadingDispatcherTasks] = useState(true);
+    const [dispatcherError, setDispatcherError] = useState('');
+    
+    const [selectedTaskForAssign, setSelectedTaskForAssign] = useState<Task | null>(null);
+    const [selectedTaskForReassign, setSelectedTaskForReassign] = useState<Task | null>(null);
+    const [selectedTaskForFollowUp, setSelectedTaskForFollowUp] = useState<Task | null>(null);
+    const [viewingTask, setViewingTask] = useState<Task | null>(null);
+    const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+    const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
+    const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+    const [agentTaskCounts, setAgentTaskCounts] = useState<Record<string, Record<string, number>>>({});
+
+    const toggleExpanded = (taskId: string) => {
+        setExpandedRows(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(taskId)) {
+                newSet.delete(taskId);
+            } else {
+                newSet.add(taskId);
+            }
+            return newSet;
+        });
+    };
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+          case 'Scheduled': return 'bg-blue-100 text-blue-800';
+          case 'In Transit': return 'bg-yellow-100 text-yellow-800';
+          case 'Delivered': return 'bg-green-100 text-green-800';
+          case 'Cancelled': return 'bg-red-100 text-red-800';
+          default: return 'bg-gray-100 text-gray-800';
+        }
+    };
+      
+    const getPaymentStatusColor = (status: string) => {
+        switch (status) {
+            case 'Paid': return 'bg-green-100 text-green-800';
+            case 'Pending': return 'bg-yellow-100 text-yellow-800';
+            case 'Partial': return 'bg-blue-100 text-blue-800';
+            case 'Overdue': return 'bg-red-100 text-red-800';
+            default: return 'bg-gray-100 text-gray-800';
         }
     };
 
     useEffect(() => {
-        const fetchSaleAgents = async () => {
-            try {
-                const response = await findUsersByRole(Role.SaleAgent);
-                setSaleAgents(response.data);
-                if (response.data.length > 0) {
-                    setSelectedAgent(response.data[0]._id);
-                }
-            } catch (err) {
-                setError('Failed to fetch sale agents.');
-                console.error(err);
+        const isModalOpen = !!selectedTaskForAssign || !!selectedTaskForReassign || !!selectedTaskForFollowUp || !!viewingTask || !!taskToDelete || showDeleteConfirmation;
+        document.body.style.overflow = isModalOpen ? 'hidden' : 'unset';
+        return () => { document.body.style.overflow = 'unset'; };
+    }, [selectedTaskForAssign, selectedTaskForReassign, selectedTaskForFollowUp, viewingTask, taskToDelete, showDeleteConfirmation]);
+
+    const fetchActionRequiredTasks = useCallback(async () => {
+        setLoadingActionTasks(true);
+        try {
+            const response = await getTasksByAgentAndStatus(activeAgentId, agentReviewTab);
+            setActionTasks(response.data);
+        } catch (err) {
+            // This error will be specific to this fetch, not shown in upload form
+        } finally {
+            setLoadingActionTasks(false);
+        }
+    }, [activeAgentId, agentReviewTab]);
+
+    const fetchDispatcherData = useCallback(async () => {
+        setLoadingDispatcherTasks(true);
+        setDispatcherError('');
+        try {
+            const response = await getDispatcherOverviewTasks();
+            setDispatcherTasks(response.data);
+            if (response.data.length > 0) {
+                const allTaskIds = new Set<string>(response.data.map((task: Task) => task._id));
+                setExpandedRows(allTaskIds);
             }
-        };
-        fetchSaleAgents();
-        fetchHistory();
+        } catch (err) {
+            setDispatcherError('Failed to fetch dispatcher tasks. Please try again.');
+        } finally {
+            setLoadingDispatcherTasks(false);
+        }
     }, []);
 
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files) {
-            setFile(e.target.files[0]);
-            setSuccess('');
-            setError('');
+    useEffect(() => {
+        const fetchInitialData = async () => {
+            try {
+                const [agentsRes, dispatchersRes, countsRes] = await Promise.all([
+                    findUsersByRole(Role.SaleAgent),
+                    findUsersByRole(Role.Dispatcher),
+                    getAgentTaskCounts()
+                ]);
+                setSaleAgents(agentsRes.data);
+                setDispatchers(dispatchersRes.data);
+                setAgentTaskCounts(countsRes.data);
+            } catch (err) {
+                console.error("Failed to fetch initial data", err);
+            }
+        };
+
+        fetchInitialData();
+        fetchDispatcherData();
+    }, [fetchDispatcherData]);
+
+    useEffect(() => {
+        fetchActionRequiredTasks();
+        setSelectedTasks(new Set());
+    }, [activeAgentId, agentReviewTab, fetchActionRequiredTasks]);
+    
+    const handleDeleteTask = async () => {
+        if (taskToDelete) {
+            setIsDeleting(true);
+            try {
+                await deleteTask(taskToDelete._id);
+                setTaskToDelete(null);
+                fetchActionRequiredTasks();
+            } catch (err) {
+                // Handle delete error
+            } finally {
+                setIsDeleting(false);
+            }
+        } else if (selectedTasks.size > 0) {
+            setIsDeleting(true);
+            try {
+                await deleteMultipleTasks(Array.from(selectedTasks));
+                setSelectedTasks(new Set());
+                setShowDeleteConfirmation(false);
+                fetchActionRequiredTasks();
+            } catch (err) {
+                 // Handle delete error
+            } finally {
+                setIsDeleting(false);
+            }
         }
     };
-
-    const handleUpload = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!file || !selectedAgent) {
-            setError('Please select a sale agent and a file.');
-            return;
-        }
-        setError('');
-        setSuccess('');
-        setUploading(true);
-        try {
-            await uploadTasks(selectedAgent, file);
-            setSuccess('Tasks uploaded successfully!');
-            setFile(null);
-            // Refresh history after upload
-            fetchHistory();
-        } catch (err) {
-            setError('Failed to upload tasks.');
-            console.error(err);
-        } finally {
-            setUploading(false);
-        }
+    
+    const handleSelectTask = (taskId: string) => {
+        setSelectedTasks(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(taskId)) {
+                newSet.delete(taskId);
+            } else {
+                newSet.add(taskId);
+            }
+            return newSet;
+        });
     };
 
-    const renderUploadForm = () => (
-        <div className="bg-white p-6 rounded-lg shadow-md max-w-lg mx-auto">
-            <h2 className="text-2xl font-bold mb-4">Assign Tasks via CSV</h2>
-            <form onSubmit={handleUpload}>
-                {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-                {success && <p className="text-green-500 text-sm mb-4">{success}</p>}
-                <div className="mb-4">
-                    <label className="block text-gray-700">Assign to Sale Agent</label>
-                    <select
-                        value={selectedAgent}
-                        onChange={(e) => setSelectedAgent(e.target.value)}
-                        className="w-full p-2 border rounded"
-                        required
-                    >
-                        <option value="" disabled>Select an agent</option>
-                        {saleAgents.map((agent) => (
-                            <option key={agent._id} value={agent._id}>
-                                {agent.name}
-                            </option>
-                        ))}
-                    </select>
-                </div>
-                <div className="mb-4">
-                    <label className="block text-gray-700">Upload CSV File</label>
-                    <input
-                        type="file"
-                        accept=".csv"
-                        onChange={handleFileChange}
-                        className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                        required
-                    />
-                </div>
-                <button
-                    type="submit"
-                    className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600 disabled:bg-gray-400"
-                    disabled={uploading}
-                >
-                    {uploading ? 'Uploading...' : 'Upload and Assign'}
-                </button>
-            </form>
-        </div>
-    );
-
-    const renderHistory = () => (
-        <div className="bg-white p-6 rounded-lg shadow-md">
-            <h2 className="text-2xl font-bold mb-4">Upload History</h2>
-            {loadingHistory ? <p>Loading history...</p> : (
-                <div className="overflow-x-auto">
-                    <table className="min-w-full bg-white">
-                        <thead>
-                            <tr>
-                                <th className="py-2 px-4 border-b">Date</th>
-                                <th className="py-2 px-4 border-b">File Name</th>
-                                <th className="py-2 px-4 border-b">Assigned To</th>
-                                <th className="py-2 px-4 border-b">Tasks Created</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {history.length > 0 ? history.map((item) => (
-                                <tr key={item._id}>
-                                    <td className="py-2 px-4 border-b">{new Date(item.createdAt).toLocaleString()}</td>
-                                    <td className="py-2 px-4 border-b">{item.fileName}</td>
-                                    <td className="py-2 px-4 border-b">{item.assignedAgentName}</td>
-                                    <td className="py-2 px-4 border-b">{item.taskCount}</td>
-                                </tr>
-                            )) : (
-                                <tr>
-                                    <td colSpan={4} className="text-center py-4">No upload history found.</td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </div>
-    );
-
+    const handleSelectAll = () => {
+        if (selectedTasks.size === actionTasks.length) {
+            setSelectedTasks(new Set());
+        } else {
+            setSelectedTasks(new Set(actionTasks.map(t => t._id)));
+        }
+    };
+    
     return (
-        <div className="container mx-auto p-4">
-            <h1 className="text-3xl font-bold mb-6">Project Divider Dashboard</h1>
-            
-            <div className="border-b border-gray-200 mb-4">
-                <nav className="-mb-px flex space-x-8" aria-label="Tabs">
-                    <button
-                        onClick={() => setActiveTab('upload')}
-                        className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                        activeTab === 'upload'
-                            ? 'border-indigo-500 text-indigo-600'
-                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                        }`}
-                    >
-                        Upload Tasks
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('history')}
-                        className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                        activeTab === 'history'
-                            ? 'border-indigo-500 text-indigo-600'
-                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                        }`}
-                    >
-                        Upload History
-                    </button>
-                </nav>
+        <div className="bg-gray-50 min-h-screen">
+            <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+                <header className="mb-8">
+                    <div>
+                        <h1 className="text-4xl font-bold text-gray-800 tracking-tight">Project Divider Dashboard</h1>
+                        <p className="text-gray-500 mt-1">Manage, assign, and track all team tasks efficiently.</p>
+                    </div>
+                </header>
+
+                <div className="mb-6">
+                    <div className="bg-white p-2 rounded-xl shadow-sm border border-gray-200 inline-flex space-x-2">
+                        <button onClick={() => setMainActiveTab('agents')} className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${mainActiveTab === 'agents' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>Sale Agent Review</button>
+                        <button onClick={() => setMainActiveTab('dispatchers')} className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${mainActiveTab === 'dispatchers' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>Dispatcher Overview</button>
+                        <button onClick={() => setMainActiveTab('upload')} className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${mainActiveTab === 'upload' ? 'bg-indigo-600 text-white shadow' : 'text-gray-600 hover:bg-gray-100'}`}>Upload Tasks</button>
+                    </div>
+                </div>
+                
+                {mainActiveTab === 'upload' && <UploadTasksForm saleAgents={saleAgents} />}
+
+                {mainActiveTab === 'agents' && (
+                    <div>
+                        <div className="mb-4 flex space-x-2 border-b overflow-x-auto">
+                            <button onClick={() => setActiveAgentId('all')} className={`py-3 px-4 text-sm font-medium whitespace-nowrap ${activeAgentId === 'all' ? 'border-b-2 border-indigo-500 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                                All Agents ({Object.values(agentTaskCounts).reduce((total, counts) => total + (counts.assigned || 0), 0)})
+                            </button>
+                            {saleAgents.map(agent => (
+                                <button key={agent._id} onClick={() => setActiveAgentId(agent._id)} className={`py-3 px-4 text-sm font-medium whitespace-nowrap ${activeAgentId === agent._id ? 'border-b-2 border-indigo-500 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}>
+                                    {agent.name} ({(agentTaskCounts[agent._id] && agentTaskCounts[agent._id].assigned) || 0})
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="mb-4 flex space-x-2 border-b">
+                            <button onClick={() => setAgentReviewTab('assigned')} className={`py-2 px-4 text-sm font-medium ${agentReviewTab === 'assigned' ? 'border-b-2 border-gray-500 text-gray-600' : 'text-gray-500'}`}>Assigned</button>
+                            <button onClick={() => setAgentReviewTab('submitted')} className={`py-2 px-4 text-sm font-medium ${agentReviewTab === 'submitted' ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-500'}`}>Submitted</button>
+                            <button onClick={() => setAgentReviewTab('neglected')} className={`py-2 px-4 text-sm font-medium ${agentReviewTab === 'neglected' ? 'border-b-2 border-red-500 text-red-600' : 'text-gray-500'}`}>Neglected</button>
+                            <button onClick={() => setAgentReviewTab('follow-up')} className={`py-2 px-4 text-sm font-medium ${agentReviewTab === 'follow-up' ? 'border-b-2 border-purple-500 text-purple-600' : 'text-gray-500'}`}>Follow Up</button>
+                        </div>
+                        
+                        {loadingActionTasks ? <p className="text-center py-8">Loading...</p> : 
+                            <ActionRequiredTasks
+                                tasksToRender={actionTasks}
+                                selectedTasks={selectedTasks}
+                                isDeleting={isDeleting}
+                                handleSelectAll={handleSelectAll}
+                                setShowDeleteConfirmation={setShowDeleteConfirmation}
+                                handleSelectTask={handleSelectTask}
+                                setViewingTask={setViewingTask}
+                                setSelectedTaskForAssign={setSelectedTaskForAssign}
+                                setTaskToDelete={setTaskToDelete}
+                                setSelectedTaskForReassign={setSelectedTaskForReassign}
+                                setSelectedTaskForFollowUp={setSelectedTaskForFollowUp}
+                            />
+                        }
+                    </div>
+                )}
+                
+                {mainActiveTab === 'dispatchers' && 
+                    <DispatcherOverview
+                        dispatchers={dispatchers}
+                        activeDispatcherId={activeDispatcherId}
+                        setActiveDispatcherId={setActiveDispatcherId}
+                        dispatcherTasks={dispatcherTasks}
+                        dispatcherError={dispatcherError}
+                        loadingDispatcherTasks={loadingDispatcherTasks}
+                        filteredDispatcherTasks={activeDispatcherId === 'all' ? dispatcherTasks : dispatcherTasks.filter(task => (task.dispatcher as User)?._id === activeDispatcherId)}
+                        expandedRows={expandedRows}
+                        toggleExpanded={toggleExpanded}
+                        getStatusColor={getStatusColor}
+                        getPaymentStatusColor={getPaymentStatusColor}
+                    />
+                }
+
+                {selectedTaskForAssign && <AssignToDispatcherModal task={selectedTaskForAssign} onClose={() => setSelectedTaskForAssign(null)} onAssigned={fetchActionRequiredTasks} />}
+                {selectedTaskForReassign && <ReassignTaskModal task={selectedTaskForReassign} onClose={() => setSelectedTaskForReassign(null)} onAssigned={fetchActionRequiredTasks} />}
+                {selectedTaskForFollowUp && <FollowUpModal task={selectedTaskForFollowUp} onClose={() => setSelectedTaskForFollowUp(null)} onSuccess={fetchActionRequiredTasks} />}
+                {viewingTask && <ViewTaskModal task={viewingTask} onClose={() => setViewingTask(null)} />}
+                {taskToDelete && <DeleteConfirmationModal task={taskToDelete} onClose={() => setTaskToDelete(null)} onConfirm={handleDeleteTask} isDeleting={isDeleting} />}
+                {showDeleteConfirmation && <DeleteConfirmationModal tasksToDelete={Array.from(selectedTasks)} onClose={() => setShowDeleteConfirmation(false)} onConfirm={handleDeleteTask} isDeleting={isDeleting} />}
             </div>
-            
-            {activeTab === 'upload' ? renderUploadForm() : renderHistory()}
         </div>
     );
 };
+

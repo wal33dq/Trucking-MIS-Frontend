@@ -7,8 +7,8 @@ import { LoginPage } from './pages/LoginPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { DividerDashboard } from './pages/DividerDashboard';
 import { SaleAgentDashboard } from './pages/SaleAgentDashboard';
-import { AgentTaskDetail } from './pages/AgentTaskDetail';
 import { DispatcherDashboard } from './pages/DispatcherDashboard';
+import { OwnerDashboard } from './pages/OwnerDashboard'; // Import the new dashboard
 
 const AppContent = () => {
   const { user, isAuthenticated, logout, isLoading } = useAuth(); // <-- Get isLoading state
@@ -29,6 +29,8 @@ const AppContent = () => {
     switch (user.role) {
       case Role.Admin:
         return <Navigate to="/admin" />;
+      case Role.Owner:
+        return <Navigate to="/owner" />;
       case Role.ProjectDivider:
         return <Navigate to="/divider" />;
       case Role.SaleAgent:
@@ -62,8 +64,13 @@ const AppContent = () => {
                 <Route path="/" element={renderDashboard()} />
 
                 <Route path="/admin" element={
-                    <ProtectedRoute allowedRoles={[Role.Admin, Role.Owner]}>
+                    <ProtectedRoute allowedRoles={[Role.Admin]}>
                         <AdminDashboard />
+                    </ProtectedRoute>
+                } />
+                 <Route path="/owner" element={
+                    <ProtectedRoute allowedRoles={[Role.Owner, Role.Admin]}>
+                        <OwnerDashboard />
                     </ProtectedRoute>
                 } />
                 <Route path="/divider" element={
@@ -76,11 +83,7 @@ const AppContent = () => {
                         <SaleAgentDashboard />
                     </ProtectedRoute>
                 } />
-                <Route path="/task/:id" element={
-                    <ProtectedRoute allowedRoles={[Role.SaleAgent]}>
-                        <AgentTaskDetail />
-                    </ProtectedRoute>
-                } />
+              
                 <Route path="/dispatcher" element={
                     <ProtectedRoute allowedRoles={[Role.Dispatcher]}>
                         <DispatcherDashboard />
